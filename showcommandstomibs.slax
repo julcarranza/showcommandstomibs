@@ -1,0 +1,218 @@
+/* * ---------------------------------------------------------------------
+#  *  Author        : Julio Carranza
+#  *  Name          : showcommandstomibs.slax
+#  *  Version       : 1.0 - MIBs for PFE throughput for MPC4s and fabric
+#  *                  drops
+
+#  *
+#  *  Last Modified : 2016-Feb-4
+#  *  Script Type   : event
+#  *  Description   : Output command to map to MIBS for SNMP monitoring
+#  *
+#  *  License       : BSD-Style
+#  *  Copyright (c) 2010 Julio Carranza. All Rights Reserved.
+#  *  Redistribution and use in source and binary forms, with or without
+#  *  modification, are permitted provided that the following conditions
+#  *  are met: 1. Redistributions of source code must retain the above
+#  *  copyright notice, this list of conditions and the following
+#  *  disclaimer.  2. Redistributions in binary form must reproduce the
+#  *  above copyright notice, this list of conditions and the following
+#  *  disclaimer in the documentation and/or other materials provided
+#  *  with the distribution.  3. The name of the author may not be used
+#  *  to endorse or promote products derived from this software without
+#  *  specific prior written permission.  THIS SOFTWARE IS PROVIDED BY
+#  *  THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+#  *  INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  *  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+#  *  DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
+#  *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+#  *  (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+#  *  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+#  *  HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+#  *  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  *  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+#  *  EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# */
+ 
+version 1.0;
+ 
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns ext = "http://xmlsoft.org/XSLT/namespace";
+ns exsl extension = "http://exslt.org/common";
+
+
+ 
+import "../import/junos.xsl";
+                           
+ 
+
+
+var $event-definition = {
+	<event-options> {
+		<generate-event> {
+			<name> "interface-refresh";
+			<time-interval> "60";
+		}                               
+ 
+		<policy> {
+			<name> "showcommandstomibs";
+			<events> "interface-refresh";
+			<then>{
+				<event-script>{
+					<name> "showcommandstomibs.slax";
+				}
+			}
+		}
+ 
+	}
+}
+ 
+
+
+var $jnx = jcs:open();
+ 
+match / {
+ 
+/*Start of MPC4 Monitoring */
+	/* Store get-chassis-hardware output in $chassi to find the MPC4 cards*/
+	var $cmd1 = <get-chassis-inventory>;
+	var $chassis = jcs:invoke($cmd1 );
+ 
+	/* Store get-interface-information output in $interface to ger the
+	input traffic per interface in the MPC4 cards */
+	var $cmd2 = <get-interface-information>;
+	var $interface = jcs:invoke($cmd2 );
+	
+	var $mpc4 := { 
+    		for-each ($chassis/chassis/chassis-module[starts-with(description, 'MPC4E ')]) {
+			var $fpc =jcs:split(" ", name);
+
+			<slots> $fpc[2];
+		}
+	}
+	for-each ($mpc4/slots) {
+		var $slot = .;
+		mvar $fpc10 = $slot;
+		if ($fpc10 == 10){
+			set $fpc10 = ':';	
+		} 
+		if ($fpc10 == 11){
+			set $fpc10 = ';';	
+		}
+		if ($fpc10 == 12){
+			set $fpc10 = '<';	
+		} 
+		if ($fpc10 == 13){
+			set $fpc10 = '=';	
+		} 
+		if ($fpc10 == 14){
+			set $fpc10 = '>';	
+		} 
+		if ($fpc10 == 15){
+			set $fpc10 = '?';	
+		} 
+		if ($fpc10 == 16){
+			set $fpc10 = '@';	
+		} 
+		if ($fpc10 == 17){
+			set $fpc10 = 'A';	
+		}  
+		if ($fpc10 == 18){
+			set $fpc10 = 'B';	
+		} 
+		if ($fpc10 == 19){
+			set $fpc10 = 'C';	
+		} 
+		var $xm0in := { 
+			for-each ($interface/physical-interface[starts-with(name, 'xe-'_$slot _'/0')]) {
+				<bps> traffic-statistics/input-bps;
+			}
+			for-each ($interface/physical-interface[starts-with(name, 'xe-'_$slot _'/1')]) {		
+				<bps> traffic-statistics/input-bps;
+			}
+			for-each ($interface/physical-interface[starts-with(name, 'et-'_$slot _'/1')]) {			
+				<bps> traffic-statistics/input-bps;
+			}
+		}
+
+		mvar $mibname = concat('mpc4', $fpc10, '0i');
+    		mvar $mibvalue = sum( $xm0in/bps );
+
+		call writemib($mibname, $mibvalue);
+
+		var $xm0out := { 
+			for-each ($interface/physical-interface[starts-with(name, 'xe-'_$slot _'/0')]) {
+				<bps> traffic-statistics/output-bps;
+			}
+			for-each ($interface/physical-interface[starts-with(name, 'xe-'_$slot _'/1')]) {		
+				<bps> traffic-statistics/output-bps;
+			}
+			for-each ($interface/physical-interface[starts-with(name, 'et-'_$slot _'/1')]) {				
+				<bps> traffic-statistics/output-bps;
+			}
+		}
+		set $mibname = concat('mpc4', $fpc10, '0o');
+    		set $mibvalue = sum( $xm0out/bps );
+
+		call writemib($mibname, $mibvalue);
+		var $xm1in := { 
+			for-each ($interface/physical-interface[starts-with(name, 'xe-'_$slot _'/2')]) {	
+				<bps> traffic-statistics/input-bps;
+			}
+			for-each ($interface/physical-interface[starts-with(name, 'xe-'_$slot _'/3')]) {	
+				<bps> traffic-statistics/input-bps;
+			}
+			for-each ($interface/physical-interface[starts-with(name, 'et-'_$slot _'/3')]) {	
+				<bps> traffic-statistics/input-bps;
+			}
+		}
+		set $mibname = concat('mpc4', $fpc10, '1i');
+    		set $mibvalue = sum( $xm1in/bps );
+		call writemib($mibname, $mibvalue);	
+
+		var $xm1out := { 
+			for-each ($interface/physical-interface[starts-with(name, 'xe-'_$slot _'/2')]) {	
+				<bps> traffic-statistics/output-bps;
+			}
+			for-each ($interface/physical-interface[starts-with(name, 'xe-'_$slot _'/3')]) {	
+				<bps> traffic-statistics/output-bps;
+			}
+			for-each ($interface/physical-interface[starts-with(name, 'et-'_$slot _'/3')]) {	
+				<bps> traffic-statistics/output-bps;
+			}
+		}
+		set $mibname = concat('mpc4', $fpc10, '1o');
+    		set $mibvalue = sum( $xm1out/bps );
+		call writemib($mibname, $mibvalue);	
+
+		/* Get pfe statistics*/
+		var $cmd3 = <command> "show pfe statistics traffic fpc "_$slot;
+		var $pfe = jcs:invoke($cmd3 );
+		
+		set $mibvalue = $pfe/pfe-hardware-discard-statistics/fabric-discard;
+		set $mibname = concat('mpc4', $fpc10, 'd');
+		call writemib($mibname, $mibvalue);	
+
+
+	}
+/* End of MPC4 Monitoring */
+	expr jcs:close( $jnx );
+}
+
+template writemib($mibname, $mibvalue){
+        /*var $facility-severity = "daemon.alert";
+	expr jcs:syslog( $facility-severity, $mibname);	
+	expr jcs:syslog( $facility-severity, $mibvalue);	*/
+	var $rpc = <request-snmp-utility-mib-set> {
+		<instance> $mibname;
+		<object-type> "integer";
+		<object-value> $mibvalue;
+    	}
+    	var $result = jcs:invoke( $rpc );
+    	for-each( $result//self::xnm:error ) {
+        	expr jcs:syslog( "daemon.error", "Error writing Utility MIB: ", message );
+    	} 
+
+}
